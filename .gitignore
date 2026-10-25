@@ -2,6 +2,7 @@ venv/
 __pycache__/
 .env
 db/
+eval/.db/
 docs/
 .DS_Store
 .idea/
