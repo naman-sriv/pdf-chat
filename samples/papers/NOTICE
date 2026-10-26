@@ -1,0 +1,37 @@
+Third-party papers in this folder
+
+These PDFs are unmodified copies of the latest arXiv version of each paper, downloaded
+on 2026-10-26 and renamed for convenience. Copyright remains with the authors. They are
+redistributed here under the licenses their authors chose on arXiv, and are used only as
+test documents for this project.
+
+sentence-bert.pdf
+  Nils Reimers, Iryna Gurevych (2019).
+  "Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks."
+  https://arxiv.org/abs/1908.10084
+  License: CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
+
+beir.pdf
+  Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava, Iryna Gurevych (2021).
+  "BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models."
+  https://arxiv.org/abs/2104.08663
+  License: CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
+
+ragas.pdf
+  Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert (2023).
+  "Ragas: Automated Evaluation of Retrieval Augmented Generation."
+  https://arxiv.org/abs/2309.15217
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+self-rag.pdf
+  Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi (2023).
+  "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection."
+  https://arxiv.org/abs/2310.11511
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+graph-rag.pdf
+  Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody,
+  Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, Jonathan Larson (2024).
+  "From Local to Global: A Graph RAG Approach to Query-Focused Summarization."
+  https://arxiv.org/abs/2404.16130
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
