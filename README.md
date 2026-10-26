@@ -6,8 +6,9 @@
 Question: What does GOVERN 1.7 require?
 [1]
 
-Processes and procedures are in place for decommissioning and phasing out AI systems safely
-and in a manner that does not increase risks or decrease the organization’s trustworthiness.
+Processes and procedures are in place for decommissioning and phasing out
+AI systems safely and in a manner that does not increase risks or decrease
+the organization’s trustworthiness.
 
 Sources:
   [1] nist-ai-rmf-1.0.pdf, p. 28, AI RMF Core > Govern
@@ -21,23 +22,17 @@ Sources:
 ## How it works
 
 ```mermaid
-flowchart LR
-    subgraph Ingest
-        A[PDF / Markdown / text] --> B[Find headings<br/>in the text]
-        B --> C[Split sections into<br/>paragraph-aware chunks]
-        C --> D[Embed heading + chunk<br/>nomic-embed-text]
-        D --> E[(Chroma)]
+flowchart TB
+    subgraph Ingest["ingest.py"]
+        direction LR
+        A[PDF / Markdown / text] --> B[Find headings] --> C[Paragraph-aware chunks] --> D[Embed heading + chunk] --> E[(Chroma)]
     end
-    subgraph Ask
-        Q[Question] --> V[Vector search<br/>top 20]
-        Q --> K[BM25 keyword search<br/>top 20]
-        V --> F[Reciprocal rank fusion]
-        K --> F
-        F --> R[Cross-encoder rerank<br/>bge-reranker-base]
-        R --> L[Top 4 to llama3.1<br/>answer with citations]
+    subgraph Ask["ask.py"]
+        direction LR
+        Q[Question] --> V[Vector top 20] & K[BM25 top 20]
+        V & K --> F[Rank fusion] --> R[Rerank] --> L[Top 4 to LLM, cited answer]
     end
-    E -.-> V
-    E -.-> K
+    Ingest --> Ask
 ```
 
 - **Chunking:** each document is cut into sections at its headings (PDF bookmarks, or `#` headings in Markdown), then split on paragraphs, lines and sentences into chunks of up to 800 characters. Bookmark page numbers are often wrong, so each heading is located in the text itself: searching forward from the previous one, at the start of a line, ignoring case and section numbers, and skipping table-of-contents pages.
