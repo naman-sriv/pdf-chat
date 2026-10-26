@@ -36,9 +36,10 @@ def outline(reader):
 
 def heading_pattern(title):
     # Line start, optional section number ("3.1", "3.1." or glued "3.1Valid"), then the
-    # title; layout extraction sometimes drops spaces, so words may run together
+    # title; layout extraction sometimes drops spaces, so words may run together.
+    # Case-insensitive because papers often print "1 INTRODUCTION" for bookmark "Introduction"
     words = r"\s*".join(map(re.escape, title.split()))
-    return re.compile(r"(?m)^(?:\d+(?:\.\d+)*\.?\s*)?" + words + r"(?!\w)")
+    return re.compile(r"(?mi)^(?:\d+(?:\.\d+)*\.?\s*)?" + words + r"(?!\w)")
 
 def find_headings(pages, marks):
     # Bookmark page numbers can be wrong, so search forward from the previous heading
