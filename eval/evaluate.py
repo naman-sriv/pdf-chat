@@ -41,7 +41,7 @@ def main():
     if bad:
         raise SystemExit("No chunk matches the label for:\n  " + "\n  ".join(bad))
 
-    retriever.reranker  # load before timing
+    retriever.load_reranker()  # so model loading isn't counted in the first query's latency
     types = sorted({it["type"] for it in items})
     rows, misses = [], {}
     for method in Retriever.METHODS:

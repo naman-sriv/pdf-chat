@@ -19,7 +19,7 @@ def main():
     if not retriever.ids:
         raise SystemExit("Index is empty. Add files to docs/ and run ingest.py first.")
     print("Loading reranker...")
-    retriever.reranker
+    retriever.load_reranker()
     print("Ask about your documents. Ctrl+D or 'exit' to quit.")
     try:
         while True:

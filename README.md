@@ -1,16 +1,47 @@
 # pdf-chat
 
-Chat with your own PDFs and text files, fully locally. Documents are chunked, embedded with Ollama's `nomic-embed-text`, stored in a local Chroma database, and answered by `llama3.1` using only the retrieved context.
+**Local RAG over PDFs with hybrid search, reranking and page-level citations.** On a 48-page NIST framework, the full pipeline gets the right passage into the LLM's context for **84%** of questions, versus **75%** for vector search alone, and finds **8/8** exact-term lookups such as `GOVERN 6.1`, where vector search finds 4. Everything runs on your machine: no API keys, and no documents leave it.
+
+```text
+Question: What does GOVERN 1.7 require?
+[1]
+
+Processes and procedures are in place for decommissioning and phasing out
+AI systems safely and in a manner that does not increase risks or decrease
+the organization’s trustworthiness.
+
+Sources:
+  [1] nist-ai-rmf-1.0.pdf, p. 28, AI RMF Core > Govern
+  [2] nist-ai-rmf-1.0.pdf, p. 27, AI RMF Core > Govern
+  [3] nist-ai-rmf-1.0.pdf, p. 27, AI RMF Core > Govern
+  [4] nist-ai-rmf-1.0.pdf, p. 26, AI RMF Core > Govern
+```
+
+*Real output from `llama3.1` on the [NIST AI RMF](samples/nist-ai-rmf-1.0.pdf), unedited.*
 
 ## How it works
 
-- **Chunking:** each document is cut into sections at its headings (PDF bookmarks, or `#` headings in Markdown), then split on paragraphs, lines and sentences into chunks of up to 800 characters. Bookmark page numbers are often wrong, so each heading is located in the text itself, searching forward from the previous one and skipping table-of-contents pages.
-- **Metadata:** every chunk stores its source file, page number (PDFs) and section path, such as `Must Have Skills > Databases`. Answers cite these.
-- **Retrieval:** vector search and BM25 keyword search each return 20 candidates, which are merged with reciprocal rank fusion. The `BAAI/bge-reranker-base` cross-encoder reorders them, and the top 4 go to the LLM.
+```mermaid
+flowchart TB
+    subgraph Ingest["ingest.py"]
+        direction LR
+        A[PDF / Markdown / text] --> B[Find headings] --> C[Paragraph-aware chunks] --> D[Embed heading + chunk] --> E[(Chroma)]
+    end
+    subgraph Ask["ask.py"]
+        direction LR
+        Q[Question] --> V[Vector top 20] & K[BM25 top 20]
+        V & K --> F[Rank fusion] --> R[Rerank] --> L[Top 4 to LLM, cited answer]
+    end
+    Ingest --> Ask
+```
+
+- **Chunking:** each document is cut into sections at its headings (PDF bookmarks, or `#` headings in Markdown), then split on paragraphs, lines and sentences into chunks of up to 800 characters. Bookmark page numbers are often wrong, so each heading is located in the text itself: searching forward from the previous one, at the start of a line, ignoring case and section numbers, and skipping table-of-contents pages.
+- **Metadata:** every chunk stores its source file, page number (PDFs) and section path, such as `AI RMF Core > Govern`. Answers cite these.
+- **Retrieval:** vector search and BM25 keyword search each return 20 candidates, which are merged with reciprocal rank fusion. Fusion uses rank positions, not scores, because the two searches score on different scales. The `BAAI/bge-reranker-base` cross-encoder reorders the merged list, and the top 4 go to the LLM.
 
 ## Evaluation
 
-[`eval/evaluate.py`](eval/evaluate.py) compares the four retrieval stages on 32 labeled questions about the [NIST AI Risk Management Framework](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf) (48 pages, 247 chunks, included in [`samples/`](samples/) as a public-domain US government work). Each question is labeled with the section holding the answer and a phrase that must appear in the retrieved chunk. 24 questions are worded differently from the document (**concept**); 8 use exact terms such as `GOVERN 6.1` (**exact-term**).
+[`eval/evaluate.py`](eval/evaluate.py) compares the four retrieval stages on 32 labeled questions about the [NIST AI Risk Management Framework](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf) (48 pages, 247 chunks; a public-domain US government work). Each question is labeled with the section holding the answer and a phrase that must appear in the retrieved chunk. 24 questions are worded differently from the document (**concept**); 8 use exact terms such as `GOVERN 6.1` (**exact-term**).
 
 | Method | Hit@1 | Hit@4 | MRR@10 | concept (hit@4) | exact-term (hit@4) | Latency / query |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -22,15 +53,23 @@ Chat with your own PDFs and text files, fully locally. Documents are chunked, em
 Hit@4 is the share of questions whose answer reaches the LLM. What the numbers show:
 
 - **The two searches fail on different questions.** Vector search misses half the exact-term questions, such as section IDs, while BM25 misses half the reworded ones. Hybrid search keeps most of both.
-- **The reranker gives the biggest gain.** It lifts Hit@1 from 50% to 62%, at the cost of about a third of a second per query on a laptop CPU/GPU.
+- **The reranker gives the biggest gain.** It lifts Hit@1 from 50% to 62%, at the cost of about a third of a second per query on a laptop.
 - **Vector search still wins on reworded questions.** Fusion with BM25 costs two of those, and reranking recovers only one.
 
-Caveats: 32 questions is a small set, so a one-question difference (3 points) is noise. The questions were written after reading the document, not by independent annotators. Full per-question misses are in [`eval/results.md`](eval/results.md).
+Full per-question misses are in [`eval/results.md`](eval/results.md).
 
 ```bash
 python eval/evaluate.py              # re-index samples/ and evaluate
 python eval/evaluate.py --skip-index # reuse the index
 ```
+
+## Limitations
+
+- **Only retrieval is evaluated, not answers.** The LLM can still answer badly from the right passages. Asked "How should an organization decide how much AI risk is acceptable?", retrieval returned the Risk Tolerance section first, but `llama3.1` replied that the context gives no direct answer.
+- **The evaluation is small.** 32 questions on one document, so a one-question difference (3 points) is noise. The questions were written after reading the document, not by independent annotators.
+- **Section names need PDF bookmarks.** PDFs without them are still chunked and cite page numbers, but chunks have no section names. Three of the five papers in [`samples/papers/`](samples/papers/) are like this.
+- **Multi-column layouts can interleave.** Pages with sidebars or two columns can come out with lines from different columns mixed together.
+- **Scanned PDFs are skipped.** There is no OCR, so PDFs without a text layer have nothing to extract.
 
 ## Requirements
 
@@ -67,19 +106,30 @@ pip install -r requirements.txt
 
    Type `exit`, or press Ctrl+D / Ctrl+C, to quit. Each answer cites numbered passages and lists their file, page and section.
 
-   The first run downloads the reranker model (about 1.1 GB) from Hugging Face into `~/.cache/huggingface`. Later runs load it from there, which takes a few seconds at startup.
+   The first run downloads the reranker model (about 1.1 GB) from Hugging Face into `~/.cache/huggingface`. Later runs load it from there, which takes a few seconds at startup. Once it's downloaded, setting `HF_HUB_OFFLINE=1` skips the update check and its warning.
 
 Both scripts resolve `docs/` and `db/` relative to their own location, so they can be run from any directory.
 
-Scanned PDFs without a text layer have no extractable text and are skipped. PDFs without bookmarks are still chunked and cite page numbers, but have no section names. Pages with sidebars or multiple columns can come out with lines from different columns interleaved.
+To try it without your own files, copy any of the sample PDFs into `docs/`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests in [`tests/`](tests/) cover heading detection (numbered, glued, capitalized and space-dropped headings, wrong bookmark pages, table-of-contents pages) and Markdown sections. They also check section start pages on the NIST and Self-RAG PDFs. They don't need Ollama.
 
 ## Project layout
 
 - `rag.py`: ingestion (section detection, chunking, indexing) and the `Retriever` with all four search methods
 - `ingest.py`, `ask.py`: command-line entry points
 - `eval/`: labeled questions, the evaluation script and its latest results
-- `samples/`: the public PDF used for evaluation
+- `tests/`: unit tests for section detection
+- `samples/nist-ai-rmf-1.0.pdf`: the evaluation document, a public-domain US government work
+- `samples/papers/`: five openly licensed arXiv papers on retrieval and RAG (Sentence-BERT, BEIR, Ragas, Self-RAG, Graph RAG) for trying the tool on academic writing. Authors and licenses are in [`NOTICE`](samples/papers/NOTICE). They aren't part of the evaluation yet.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+Code: MIT, see [LICENSE](LICENSE). Sample documents keep their own licenses, as listed above.

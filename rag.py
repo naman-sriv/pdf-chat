@@ -149,9 +149,9 @@ class Retriever:
         self.bm25 = BM25Okapi([tokens(f"{m['section']}\n{d}") for d, m in self.chunks.values()]) if self.ids else None
         self._reranker = None
 
-    @property
-    def reranker(self):
-        # Loaded on first use: importing torch and the model takes a few seconds
+    def load_reranker(self):
+        # Lazy, because importing torch and the model takes a few seconds; call it
+        # up front to pay that cost before the first query
         if self._reranker is None:
             from sentence_transformers import CrossEncoder
             self._reranker = CrossEncoder(RERANK_MODEL)
@@ -175,7 +175,7 @@ class Retriever:
 
     def rerank(self, q, n):
         pool = self.hybrid(q, self.candidates)
-        scores = self.reranker.predict([(q, self.chunks[cid][0]) for cid in pool])
+        scores = self.load_reranker().predict([(q, self.chunks[cid][0]) for cid in pool])
         return [cid for _, cid in sorted(zip(scores, pool), reverse=True)[:n]]
 
     def search(self, q, n=4, method="rerank"):
