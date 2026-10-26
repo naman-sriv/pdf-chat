@@ -6,6 +6,9 @@ from rank_bm25 import BM25Okapi
 EMBED_MODEL = "nomic-embed-text"
 RERANK_MODEL = "BAAI/bge-reranker-base"
 EXTS = (".pdf", ".txt", ".md")
+# nomic-embed-text requires a task prefix on every input, different for stored
+# documents and for search queries (see its model card)
+DOC_PREFIX, QUERY_PREFIX = "search_document: ", "search_query: "
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=800, chunk_overlap=150, separators=["\n\n", "\n", ". ", " ", ""])
@@ -76,9 +79,13 @@ def pdf_sections(path):
         yield pno + 1, section, text[start:]
 
 def md_sections(text):
-    path, buf = [], []
+    path, buf, fence = [], [], None
     for line in text.splitlines():
-        m = re.match(r"(#{1,6})\s+(.*)", line)
+        # A "# comment" inside a fenced code block is not a heading
+        marker = re.match(r"\s*(`{3,}|~{3,})", line)
+        if marker and (fence is None or marker.group(1).startswith(fence)):
+            fence = marker.group(1)[:3] if fence is None else None
+        m = None if fence else re.match(r"(#{1,6})\s+(.*)", line)
         if m:
             yield None, " > ".join(path), "\n".join(buf)
             path, buf = path[:len(m.group(1)) - 1] + [m.group(2).strip()], []
@@ -91,18 +98,32 @@ def sections(path):
     text = open(path, encoding="utf-8").read()
     return md_sections(text) if path.lower().endswith(".md") else [(None, "", text)]
 
+def is_heading_only(chunk, section):
+    # True for a chunk that is just its section's heading, however it is printed:
+    # "1.2.2Risk Tolerance", "4 EXPERIMENTS" or Markdown "## Install"
+    if not section:
+        return False
+    text = " ".join(chunk.split()).lstrip("#").strip()
+    return bool(heading_pattern(section.split(" > ")[-1]).fullmatch(text))
+
 def chunk_file(path, fname):
     chunks, metas = [], []
     for page, section, text in sections(path):
         for c in splitter.split_text(text):
-            if " ".join(c.split()) == section.split(" > ")[-1]:
-                continue  # heading with no body; its content follows under the same section
+            if is_heading_only(c, section):
+                continue  # no body; its content follows under the same section
             chunks.append(c)
             meta = {"source": fname, "section": section}
             if page:
                 meta["page"] = page
             metas.append(meta)
     return chunks, metas
+
+def embed(texts, prefix, batch=64):
+    out = []
+    for i in range(0, len(texts), batch):
+        out += ollama.embed(model=EMBED_MODEL, input=[prefix + t for t in texts[i:i+batch]])["embeddings"]
+    return out
 
 def build_index(docs_dir, db_path, log=print):
     col = chromadb.PersistentClient(path=db_path).get_or_create_collection("docs")
@@ -114,22 +135,27 @@ def build_index(docs_dir, db_path, log=print):
     for gone in indexed - set(files):
         col.delete(where={"source": gone})
 
+    failed = []
     for fname in files:
-        # Clear old chunks first so a shorter re-index leaves nothing stale behind
+        # Chunk and embed before touching the index, so a file that fails to parse or
+        # embed (e.g. Ollama not running) keeps its previous chunks
+        try:
+            chunks, metas = chunk_file(os.path.join(docs_dir, fname), fname)
+            # Prefix the heading so a chunk's topic is searchable even if the chunk never names it
+            embs = embed([f"{m['section']}\n{c}" for c, m in zip(chunks, metas)], DOC_PREFIX)
+        except Exception as e:
+            log("Failed", fname, f"({type(e).__name__}: {e}); kept its previous chunks")
+            failed.append(fname)
+            continue
+        # Clear old chunks so a shorter re-index leaves nothing stale behind
         col.delete(where={"source": fname})
-        chunks, metas = chunk_file(os.path.join(docs_dir, fname), fname)
         if not chunks:
             log("Skipped", fname, "(no extractable text)")
             continue
-        # Prefix the heading so a chunk's topic is searchable even if the chunk never names it
-        embs = []
-        for i in range(0, len(chunks), 64):
-            embs += ollama.embed(model=EMBED_MODEL, input=[f"{m['section']}\n{c}" for c, m in
-                                 zip(chunks[i:i+64], metas[i:i+64])])["embeddings"]
         col.add(ids=[f"{fname}-{i}" for i in range(len(chunks))], embeddings=embs,
                 documents=chunks, metadatas=metas)
         log("Indexed", fname, f"({len(chunks)} chunks)")
-    return col.count()
+    return col.count(), failed
 
 # ---------- Retrieval ----------
 
@@ -140,7 +166,8 @@ class Retriever:
     METHODS = ("bm25", "vector", "hybrid", "rerank")
 
     def __init__(self, db_path, candidates=20):
-        self.col = chromadb.PersistentClient(path=db_path).get_collection("docs")
+        # get_or_create so a never-indexed folder reads as an empty index instead of raising
+        self.col = chromadb.PersistentClient(path=db_path).get_or_create_collection("docs")
         store = self.col.get(include=["documents", "metadatas"])
         self.ids = store["ids"]
         self.chunks = {i: (d, m) for i, d, m in zip(store["ids"], store["documents"], store["metadatas"])}
@@ -158,7 +185,7 @@ class Retriever:
         return self._reranker
 
     def vector(self, q, n):
-        q_emb = ollama.embed(model=EMBED_MODEL, input=q)["embeddings"][0]
+        q_emb = embed([q], QUERY_PREFIX)[0]
         return self.col.query(query_embeddings=[q_emb], n_results=min(n, len(self.ids)))["ids"][0]
 
     def keyword(self, q, n):
