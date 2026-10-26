@@ -32,7 +32,9 @@ def main():
     db = os.path.join(HERE, ".db")
     if not args.skip_index:
         print("Indexing", args.docs)
-        build_index(args.docs, db, log=lambda *a: None)
+        _, failed = build_index(args.docs, db, log=lambda *a: None)
+        if failed:
+            raise SystemExit(f"Failed to index {', '.join(failed)}; is Ollama running?")
     retriever = Retriever(db)
     items = json.load(open(args.questions))
 
